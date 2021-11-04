@@ -97,8 +97,8 @@ def mid_mult(img, kernel, r, start_offset, end_offset):
 
 def replace_mid(origin, kernel, r):
     ret = origin.copy()
-    for row in range(r, -r):
-        for col in range(r, -r):
+    for row in range(r, origin.shape[0] - r + 1):
+        for col in range(r, origin.shape[1] - r + 1):
             tmp = origin[row + kernel[2][0]:row + kernel[2][1], col + kernel[2][2]:col + kernel[2][3]]
             ret[row][col] = np.median(tmp)
     return ret
@@ -145,11 +145,11 @@ if __name__ == '__main__':
     img = Image.open(img_path)
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    img = img.resize((400, 250))
     img = np.asarray(img)  # format: rows, cols, channels
-    img = np.transpose(img, (2, 0, 1))  # chw
+    img = np.transpose(img, (2, 0, 1))  # chw transpose for better debugging
     # output = SW_MeanFil(img, 3, 1)
     output = SW_MidFil(img, 3, 1)
+    output = np.transpose(output, (1, 2, 0))  # hwc
     img = Image.fromarray(output)
     img.show()
     img.save(r"G:\学校里学的\计算可视媒体\pns_panda_output.jpg")
