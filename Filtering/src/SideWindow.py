@@ -1,11 +1,9 @@
+import matplotlib
 import numpy as np
-import cv2
-import copy
-import cv_joke as cv_jk
 import scipy.signal as sci
+from PIL import Image
 import matrix as mt
-import random
-import time
+import matplotlib.pyplot as plt
 
 
 def generate(base, r0, r1, c0, c1, value):  # set appointed area to value
@@ -15,18 +13,36 @@ def generate(base, r0, r1, c0, c1, value):  # set appointed area to value
         value = 1 / num_grids
     add = np.ones([r1 - r0, c1 - c0])
     add = add * value
-    ret = ret + add
+    ret[r0:r1, c0:c1] = add
     return ret
 
-'''Side Mean Filter实现'''
+
+# complete in detail, with something wrong
+def convolve(kernels, radius, row, col, origin):
+    ret_pixel = origin[row + radius][col + radius]
+    base = ret_pixel
+    min_diff = 2147483647
+    for kernel in kernels:
+        cur_output = 0
+        for i in range(0, 2 * radius + 1):
+            for j in range(0, 2 * radius + 1):
+                cur_output += origin[row + i][col + j] * kernel[i][j]
+        cur_diff = abs(cur_output - base)
+        if cur_diff < min_diff:
+            ret_pixel = cur_output
+            min_diff = cur_diff
+    return ret_pixel
 
 
-def SW_MeanFil(img, r, iteration=1):
+# Mean filter with side window
+# Main usage: image smoothing, denoising, maybe cartoon
+def SW_MeanFil(img, r, iteration):
     zeros = np.zeros([2 * r + 1, 2 * r + 1])
-    kernel_L  = generate(zeros, 0, 2 * r + 1, 0, r + 1, 0)
-    kernel_R  = generate(zeros, 0, 2 * r + 1, r, 2 * r + 1, 0)
-    kernel_U  = generate(zeros, 0, r + 1, 0, 2 * r + 1, 0)
-    kernel_D  = generate(zeros, r, 2 * r + 1, 0, r + 1, 0)
+    # set all types of kernel to the same size by setting unrelated weights to zero, to simplify calculation
+    kernel_L = generate(zeros, 0, 2 * r + 1, 0, r + 1, 0)
+    kernel_R = generate(zeros, 0, 2 * r + 1, r, 2 * r + 1, 0)
+    kernel_U = generate(zeros, 0, r + 1, 0, 2 * r + 1, 0)
+    kernel_D = generate(zeros, r, 2 * r + 1, 0, 2 * r + 1, 0)
     kernel_NW = generate(zeros, 0, r + 1, 0, r + 1, 0)
     kernel_NE = generate(zeros, 0, r + 1, r, 2 * r + 1, 0)
     kernel_SW = generate(zeros, r, 2 * r + 1, 0, r + 1, 0)
@@ -34,24 +50,32 @@ def SW_MeanFil(img, r, iteration=1):
 
     kernels = [kernel_L, kernel_R, kernel_U, kernel_D,
                kernel_NW, kernel_NE, kernel_SW, kernel_SE]
+
+    # for padding
     m = img.shape[0] + 2 * r
     n = img.shape[1] + 2 * r
     num_channels = img.shape[2]
-    dis = np.zeros([8, m, n])
+
     ret = img.copy()
+    # for it in range(iteration):
+    #     for channel in range(num_channels):
+    #         origin = np.pad(ret[:, :, channel], (r, r), mode='constant', constant_values=0)  # padding by zero
+    #         for row in range(img.shape[0]):
+    #             for col in range(img.shape[1]):
+    #                 ret[row][col] = convolve(kernels, r, row, col, origin)
 
+    d = np.zeros([8, m, n])  # cache of differences between output and input, 8 for 8 kernels
     for channel in range(num_channels):
-        origin = np.pad(img[:, :, channel], )
-
-    for ch in range(img.shape[2]):
-        U = np.pad(img[:, :, ch], (r, r), 'edge')
-        for i in range(iteration):
-            for id, kernel in enumerate(kernels):
-                conv2 = sci.correlate2d(U, kernel, 'same')
-                dis[id] = conv2 - U
-            U = U + mt.mat_absmin(dis)
-        result[:, :, ch] = U[r:-r, r:-r]
-    return result
+        # origin = np.pad(img[:, :, channel], (r, r), mode='edge')  # padding by values at edge; which let pixels near edge influenced much more by global image edge
+        origin = np.pad(ret[:, :, channel], (r, r), mode='constant', constant_values=0)  # padding by zero
+        for it in range(iteration):
+            for i, kernel in enumerate(kernels):
+                # learned some convolution operation for speedup
+                cur_output = sci.correlate2d(origin, kernel, 'same')
+                d[i] = cur_output - origin
+            origin = origin + mt.mat_absmin(d)
+            ret[:, :, channel] = origin[r:-r, r:-r]
+    return ret
 
 
 '''滑动内核与矩阵星乘取中值'''
@@ -70,13 +94,8 @@ def mid_mult(img, kernel, r, start_offset, end_offset):
     return result
 
 
-'''Side Median Filter实现'''
-
-
-def s_medianfilter(img, radius, iteration=1):
-    r = radius
-    # 异型内核
-    k_L = np.ones((2 * r + 1, r + 1))
+def SW_MidFil(img, r, iteration=1):
+    k_L = np.ones([2 * r + 1, r + 1])
     k_R = k_L
     k_U = k_L.T
     k_D = k_U
@@ -84,16 +103,40 @@ def s_medianfilter(img, radius, iteration=1):
     k_NE = k_NW
     k_SW = k_NW
     k_SE = k_NW
-    kernels = [k_L, k_R, k_U, k_D, k_NW, k_NE, k_SW, k_SE]
+    # due to difference between mid and mean filter, size of kernels for median filter are different
+    kernel_L = np.ones([2 * r + 1, r + 1])
+    kernel_R = kernel_L  # same in appearance while different during use
+    kernel_U = kernel_L.transpose()
+    kernel_D = kernel_U
+    kernel_NW = kernel_NE = kernel_SW = kernel_SE = np.ones([r + 1, r + 1])
+
+    kernels = [kernel_L, kernel_R, kernel_U, kernel_D,
+               kernel_NW, kernel_NE, kernel_SW, kernel_SE]
+
     start_offsets = [(0, 0), (0, r), (0, 0), (r, 0), (0, 0), (0, r), (r, 0), (r, r)]
     end_offsets = [(0, r), (0, 0), (r, 0), (0, 0), (r, r), (r, 0), (0, r), (0, 0)]
 
+    # for padding
     m = img.shape[0] + 2 * r
     n = img.shape[1] + 2 * r
-    dis = np.zeros([8, m, n]);
-    result = copy.deepcopy(img)
+    num_channels = img.shape[2]
+    ret = img.copy()
+    d = np.zeros([8, m, n])  # cache of differences between output and input, 8 for 8 kernels
+
+    for channel in range(num_channels):
+        # origin = np.pad(img[:, :, channel], (r, r), mode='constant', constant_values=0)
+        # origin = np.pad(img[:, :, channel], (r, r), mode='edge')
+        origin = np.pad(img[:, :, channel], (r, r), mode='median')
+        for it in range(iteration):
+            for i, kernel in enumerate(kernels):
+                cur_output = sci.correlate2d(origin, kernel, 'same')
+                d[i] = cur_output - origin
+            origin = origin + mt.mat_absmin(d)
+            ret[:, :, channel] = origin[r:-r, r:-r]
+
+
     for ch in range(img.shape[2]):
-        U = np.pad(img[:, :, ch], (r, r), 'edge');
+        U = ;
         for i in range(iteration):
             for id in range(len(kernels)):
                 mid_result = mid_mult(U, kernels[id], r, start_offsets[id], end_offsets[id])
@@ -103,45 +146,14 @@ def s_medianfilter(img, radius, iteration=1):
     return result
 
 
-'''将内核的某一区域保留,其余置0'''
-
-
-def zeros_kernel(kernel, size=(1, 1), loc=(0, 0)):
-    kernel_tmp = np.zeros(kernel.shape)
-    kernel_tmp[loc[0]:(loc[0] + size[0]), loc[1]:(loc[1] + size[1])] = kernel[loc[0]:(loc[0] + size[0]),
-                                                                       loc[1]:(loc[1] + size[1])]
-    kernel_tmp = kernel_tmp / np.sum(kernel_tmp)
-    return kernel_tmp
-
-
-'''Side Gaussian Filter实现'''
-
-
-def s_gausfilter(img, radius, sigma=0, iteration=1):
-    r = radius
-    gaus_kernel = cv2.getGaussianKernel(2 * r + 1, sigma)  # sigma = ((n-1)*0.5 - 1)*0.3 + 0.8
-    gaus_kernel = gaus_kernel.dot(gaus_kernel.T)
-    gaus_kernel = gaus_kernel.astype(np.float)
-    k_L = zeros_kernel(gaus_kernel, size=(2 * r + 1, r + 1), loc=(0, 0))
-    k_R = zeros_kernel(gaus_kernel, size=(2 * r + 1, r + 1), loc=(0, r))
-    K_U = k_L.T
-    k_D = K_U[::-1]
-    k_NW = zeros_kernel(gaus_kernel, size=(r + 1, r + 1), loc=(0, 0))
-    k_NE = zeros_kernel(gaus_kernel, size=(r + 1, r + 1), loc=(0, r))
-    k_SW = k_NW[::-1]
-    k_SE = k_NE[::-1]
-    kernels = [k_L, k_R, K_U, k_D, k_NW, k_NE, k_SW, k_SE]
-    m = img.shape[0] + 2 * r
-    n = img.shape[1] + 2 * r
-    dis = np.zeros([8, m, n])
-    result = copy.deepcopy(img)
-    for ch in range(img.shape[2]):
-        U = np.pad(img[:, :, ch], (r, r), 'edge')
-        for i in range(iteration):
-            for id, kernel in enumerate(kernels):
-                conv2 = sci.correlate2d(U, kernel, 'same')
-                dis[id] = conv2 - U
-            U = U + mt.mat_absmin(dis)
-        result[:, :, ch] = U[r:-r, r:-r]
-    return result
-
+if __name__ == '__main__':
+    img_path = "/home/melodies/Downloads/pns_panda.jpg"
+    img = Image.open(img_path)
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+    img = np.asarray(img)  # format: rows, cols, channels
+    output = SW_MeanFil(img, 3, 3)
+    img = Image.fromarray(output)
+    img.show()
+    img.save("/home/melodies/Downloads/pns_panda_output.jpg")
+    input()
