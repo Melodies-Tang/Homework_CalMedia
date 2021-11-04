@@ -1,17 +1,7 @@
 import numpy as np
 
 
-# mat = np.array([[[-1,-2],[-3,-4],[-3,-4]],[[1,1],[2,-5],[2,-5]],[[1,1],[2,-6],[2,-6]]])
-def mat_min(mat):
-    mat_flat = mat.flatten()
-    result = []
-    step = len(mat[0].flatten())
-    for i in range(step):
-        result.append(min(mat_flat[i::step]))
-    result = np.reshape(np.array(result), mat[0].shape)
-    return result
-
-
+# replace each pixel with its best output
 def mat_absmin(mat):
     abs_index = mat_argmin(abs(mat))
     result = np.zeros(abs_index.shape)
@@ -22,6 +12,7 @@ def mat_absmin(mat):
     return result
 
 
+# return index of best kernel for each pixel
 def mat_argmin(mat):
     mat_flat = mat.flatten()
     result_index = []

@@ -6,7 +6,8 @@ import matrix as mt
 import matplotlib.pyplot as plt
 
 
-def generate(base, r0, r1, c0, c1, value):  # set appointed area to value
+# set appointed area to value
+def generate(base, r0, r1, c0, c1, value):
     ret = base.copy()
     num_grids = (r1 - r0) * (c1 - c0)
     if value == 0:
@@ -94,66 +95,62 @@ def mid_mult(img, kernel, r, start_offset, end_offset):
     return result
 
 
+def replace_mid(origin, kernel, r):
+    ret = origin.copy()
+    for row in range(r, -r):
+        for col in range(r, -r):
+            tmp = origin[row + kernel[2][0]:row + kernel[2][1], col + kernel[2][2]:col + kernel[2][3]]
+            ret[row][col] = np.median(tmp)
+    return ret
+
+
+# 改了图片格式（HWC->CHW）
 def SW_MidFil(img, r, iteration=1):
-    k_L = np.ones([2 * r + 1, r + 1])
-    k_R = k_L
-    k_U = k_L.T
-    k_D = k_U
-    k_NW = np.ones((r + 1, r + 1))
-    k_NE = k_NW
-    k_SW = k_NW
-    k_SE = k_NW
     # due to difference between mid and mean filter, size of kernels for median filter are different
-    kernel_L = np.ones([2 * r + 1, r + 1])
-    kernel_R = kernel_L  # same in appearance while different during use
-    kernel_U = kernel_L.transpose()
-    kernel_D = kernel_U
-    kernel_NW = kernel_NE = kernel_SW = kernel_SE = np.ones([r + 1, r + 1])
+    kernel_L  = [2 * r + 1, r + 1, [-r, r, -r, 0]]  # [rows, cols, [r0, r1, c0, c1]]
+    kernel_R  = [2 * r + 1, r + 1, [-r, r, 0, r]]
+    kernel_U  = [r + 1, 2 * r + 1, [-r, 0, -r, r]]
+    kernel_D  = [r + 1, 2 * r + 1, [0, r, -r, r]]
+    kernel_NW = [r + 1, r + 1, [-r, 0, -r, 0]]
+    kernel_NE = [r + 1, r + 1, [-r, 0, 0, r]]
+    kernel_SW = [r + 1, r + 1, [0, r, -r, 0]]
+    kernel_SE = [r + 1, r + 1, [0, r, 0, r]]
 
     kernels = [kernel_L, kernel_R, kernel_U, kernel_D,
                kernel_NW, kernel_NE, kernel_SW, kernel_SE]
 
-    start_offsets = [(0, 0), (0, r), (0, 0), (r, 0), (0, 0), (0, r), (r, 0), (r, r)]
-    end_offsets = [(0, r), (0, 0), (r, 0), (0, 0), (r, r), (r, 0), (0, r), (0, 0)]
-
     # for padding
-    m = img.shape[0] + 2 * r
-    n = img.shape[1] + 2 * r
-    num_channels = img.shape[2]
+    m = img.shape[1] + 2 * r
+    n = img.shape[2] + 2 * r
+    num_channels = img.shape[0]
     ret = img.copy()
     d = np.zeros([8, m, n])  # cache of differences between output and input, 8 for 8 kernels
 
     for channel in range(num_channels):
         # origin = np.pad(img[:, :, channel], (r, r), mode='constant', constant_values=0)
-        # origin = np.pad(img[:, :, channel], (r, r), mode='edge')
-        origin = np.pad(img[:, :, channel], (r, r), mode='median')
+        origin = np.pad(img[channel, :, :], (r, r), mode='edge')
+        # origin = np.pad(img[channel, :, :], (r, r), mode='median')
         for it in range(iteration):
             for i, kernel in enumerate(kernels):
-                cur_output = sci.correlate2d(origin, kernel, 'same')
+                cur_output = replace_mid(origin, kernel, r)
                 d[i] = cur_output - origin
             origin = origin + mt.mat_absmin(d)
-            ret[:, :, channel] = origin[r:-r, r:-r]
+            ret[channel, :, :] = origin[r:-r, r:-r]
 
-
-    for ch in range(img.shape[2]):
-        U = ;
-        for i in range(iteration):
-            for id in range(len(kernels)):
-                mid_result = mid_mult(U, kernels[id], r, start_offsets[id], end_offsets[id])
-                dis[id] = mid_result - U
-            U = U + mt.mat_absmin(dis)
-        result[:, :, ch] = U[r:-r, r:-r]
-    return result
+    return ret
 
 
 if __name__ == '__main__':
-    img_path = "/home/melodies/Downloads/pns_panda.jpg"
+    img_path = r"G:\学校里学的\计算可视媒体\pns_panda.jpg"
     img = Image.open(img_path)
     if img.mode != 'RGB':
         img = img.convert('RGB')
+    img = img.resize((400, 250))
     img = np.asarray(img)  # format: rows, cols, channels
-    output = SW_MeanFil(img, 3, 3)
+    img = np.transpose(img, (2, 0, 1))  # chw
+    # output = SW_MeanFil(img, 3, 1)
+    output = SW_MidFil(img, 3, 1)
     img = Image.fromarray(output)
     img.show()
-    img.save("/home/melodies/Downloads/pns_panda_output.jpg")
+    img.save(r"G:\学校里学的\计算可视媒体\pns_panda_output.jpg")
     input()
