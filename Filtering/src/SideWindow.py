@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import matplotlib
 import numpy as np
 import scipy.signal as sci
@@ -53,29 +54,35 @@ def SW_MeanFil(img, r, iteration):
                kernel_NW, kernel_NE, kernel_SW, kernel_SE]
 
     # for padding
-    m = img.shape[0] + 2 * r
-    n = img.shape[1] + 2 * r
-    num_channels = img.shape[2]
+    m = img.shape[1] + 2 * r
+    n = img.shape[2] + 2 * r
+    num_channels = img.shape[0]
 
     ret = img.copy()
     # for it in range(iteration):
     #     for channel in range(num_channels):
-    #         origin = np.pad(ret[:, :, channel], (r, r), mode='constant', constant_values=0)  # padding by zero
-    #         for row in range(img.shape[0]):
-    #             for col in range(img.shape[1]):
+    #         origin = np.pad(ret[channel, :, :], (r, r), mode='constant', constant_values=0)  # padding by zero
+    #         for row in range(img.shape[1]):
+    #             for col in range(img.shape[2]):
     #                 ret[row][col] = convolve(kernels, r, row, col, origin)
 
     d = np.zeros([8, m, n])  # cache of differences between output and input, 8 for 8 kernels
-    for channel in range(num_channels):
-        # origin = np.pad(img[:, :, channel], (r, r), mode='edge')  # padding by values at edge; which let pixels near edge influenced much more by global image edge
-        origin = np.pad(ret[:, :, channel], (r, r), mode='constant', constant_values=0)  # padding by zero
-        for it in range(iteration):
-            for i, kernel in enumerate(kernels):
-                # learned some convolution operation for speedup
-                cur_output = sci.correlate2d(origin, kernel, 'same')
-                d[i] = cur_output - origin
-            origin = origin + mt.mat_absmin(d)
-            ret[:, :, channel] = origin[r:-r, r:-r]
+
+    print("Number of processing bar based on specific algorithm")
+    with tqdm(total=8 * iteration * num_channels) as pbar:
+        pbar.set_description("Processing")
+        for channel in range(num_channels):
+            # padding by values at edge; which let pixels near edge influenced much more by global image edge
+            # origin = np.pad(img[:, :, channel], (r, r), mode='edge')
+            origin = np.pad(ret[channel, :, :], (r, r), mode='constant', constant_values=0)  # padding by zero
+            for it in range(iteration):
+                for i, kernel in enumerate(kernels):
+                    # learned some convolution operation for speedup
+                    cur_output = sci.correlate2d(origin, kernel, 'same')
+                    d[i] = cur_output - origin
+                    pbar.update(1)
+                origin = origin + mt.mat_absmin(d)
+                ret[channel, :, :] = origin[r:-r, r:-r]
     return ret
 
 
@@ -91,26 +98,34 @@ def mid_mult(img, kernel, r, start_offset, end_offset):
             mid_tmp = np.median(img_roi * kernel)
             result.append(mid_tmp)
     result = np.reshape(np.array(result), (img.shape[0] - 2 * r, img.shape[1] - 2 * r))
-    result = np.pad(result, (r, r), 'edge');
+    result = np.pad(result, (r, r), 'edge')
     return result
 
 
 def replace_mid(origin, kernel, r):
-    ret = origin.copy()
-    for row in range(r, origin.shape[0] - r + 1):
-        for col in range(r, origin.shape[1] - r + 1):
+    padm = origin.shape[0]
+    padn = origin.shape[1]
+    retm = padm - 2 * r
+    retn = padn - 2 * r
+    ret = np.zeros((retm, retn))
+    for row in range(r, retm + r):
+        for col in range(r, retn + r):
             tmp = origin[row + kernel[2][0]:row + kernel[2][1], col + kernel[2][2]:col + kernel[2][3]]
-            ret[row][col] = np.median(tmp)
+            ret[row - r][col - r] = np.median(tmp)
     return ret
 
 
-# 改了图片格式（HWC->CHW）
+# Not suitable if there is an area with too many noisy pixels (1)
+# or noise like Gaussian noise whose value distributed evenly
+# Larger radius can help, but cause color leakage meanwhile
+# Better for pepper-and-salt noise that only take 0 or 255
+
 def SW_MidFil(img, r, iteration=1):
     # due to difference between mid and mean filter, size of kernels for median filter are different
-    kernel_L  = [2 * r + 1, r + 1, [-r, r, -r, 0]]  # [rows, cols, [r0, r1, c0, c1]]
-    kernel_R  = [2 * r + 1, r + 1, [-r, r, 0, r]]
-    kernel_U  = [r + 1, 2 * r + 1, [-r, 0, -r, r]]
-    kernel_D  = [r + 1, 2 * r + 1, [0, r, -r, r]]
+    kernel_L = [2 * r + 1, r + 1, [-r, r, -r, 0]]  # [rows, cols, [r0, r1, c0, c1]]
+    kernel_R = [2 * r + 1, r + 1, [-r, r, 0, r]]
+    kernel_U = [r + 1, 2 * r + 1, [-r, 0, -r, r]]
+    kernel_D = [r + 1, 2 * r + 1, [0, r, -r, r]]
     kernel_NW = [r + 1, r + 1, [-r, 0, -r, 0]]
     kernel_NE = [r + 1, r + 1, [-r, 0, 0, r]]
     kernel_SW = [r + 1, r + 1, [0, r, -r, 0]]
@@ -120,37 +135,35 @@ def SW_MidFil(img, r, iteration=1):
                kernel_NW, kernel_NE, kernel_SW, kernel_SE]
 
     # for padding
-    m = img.shape[1] + 2 * r
-    n = img.shape[2] + 2 * r
+    m = img.shape[1]
+    n = img.shape[2]
     num_channels = img.shape[0]
-    ret = img.copy()
     d = np.zeros([8, m, n])  # cache of differences between output and input, 8 for 8 kernels
 
-    for channel in range(num_channels):
-        # origin = np.pad(img[:, :, channel], (r, r), mode='constant', constant_values=0)
-        origin = np.pad(img[channel, :, :], (r, r), mode='edge')
-        # origin = np.pad(img[channel, :, :], (r, r), mode='median')
+    print("Number of processing bar based on specific algorithm")
+    with tqdm(total=8 * num_channels * iteration) as pbar:
+        pbar.set_description("Processing")
         for it in range(iteration):
-            for i, kernel in enumerate(kernels):
-                cur_output = replace_mid(origin, kernel, r)
-                d[i] = cur_output - origin
-            origin = origin + mt.mat_absmin(d)
-            ret[channel, :, :] = origin[r:-r, r:-r]
-
-    return ret
+            for channel in range(num_channels):
+                # pad = np.pad(img[channel, :, :], (r, r), mode='constant', constant_values=0)
+                pad = np.pad(img[channel, :, :], (r, r), mode='edge')
+                # pad = np.pad(img[channel, :, :], (r, r), mode='median')
+                for i, kernel in enumerate(kernels):
+                    cur_output = replace_mid(pad, kernel, r)
+                    d[i] = cur_output - img[channel, :, :]
+                    pbar.update(1)
+                img[channel, :, :] = img[channel, :, :] + mt.mat_absmin(d)
+    return img
 
 
 if __name__ == '__main__':
-    img_path = r"G:\学校里学的\计算可视媒体\pns_panda.jpg"
+    img_path = "/home/melodies/Downloads/test_pns.png"
     img = Image.open(img_path)
-    if img.mode != 'RGB':
-        img = img.convert('RGB')
     img = np.asarray(img)  # format: rows, cols, channels
-    img = np.transpose(img, (2, 0, 1))  # chw transpose for better debugging
-    # output = SW_MeanFil(img, 3, 1)
-    output = SW_MidFil(img, 3, 1)
+    img = np.transpose(img, (2, 0, 1))  # chw. transpose for better debugging
+    # output = SW_MeanFil(img, 5, 1)
+    output = SW_MidFil(img, 5, 1)
     output = np.transpose(output, (1, 2, 0))  # hwc
     img = Image.fromarray(output)
     img.show()
-    img.save(r"G:\学校里学的\计算可视媒体\pns_panda_output.jpg")
-    input()
+    img.save("/home/melodies/Downloads/test_depns.png")
