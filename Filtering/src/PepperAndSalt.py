@@ -22,8 +22,8 @@ if __name__ == '__main__':
     img = Image.open(img_path)
     img = np.asarray(img)
     img = np.transpose(img, (2, 0, 1))  # chw. transpose for better debugging
-    output = generate_pns_noise(img)
+    output = generate_pns_noise(img, 0.1)
     output = np.transpose(output, (1, 2, 0))  # hwc
     img = Image.fromarray(output)
     img.show()
-    img.save("/home/melodies/Downloads/test_pns.png")
+    img.save("/home/melodies/Downloads/test_pns_0.1.png")

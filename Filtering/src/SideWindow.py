@@ -1,3 +1,4 @@
+import os
 from tqdm import tqdm
 import matplotlib
 import numpy as np
@@ -134,10 +135,11 @@ def SW_MidFil(img, r, iteration=1):
     kernels = [kernel_L, kernel_R, kernel_U, kernel_D,
                kernel_NW, kernel_NE, kernel_SW, kernel_SE]
 
+    ret = img.copy()
     # for padding
-    m = img.shape[1]
-    n = img.shape[2]
-    num_channels = img.shape[0]
+    m = ret.shape[1]
+    n = ret.shape[2]
+    num_channels = ret.shape[0]
     d = np.zeros([8, m, n])  # cache of differences between output and input, 8 for 8 kernels
 
     print("Number of processing bar based on specific algorithm")
@@ -146,24 +148,54 @@ def SW_MidFil(img, r, iteration=1):
         for it in range(iteration):
             for channel in range(num_channels):
                 # pad = np.pad(img[channel, :, :], (r, r), mode='constant', constant_values=0)
-                pad = np.pad(img[channel, :, :], (r, r), mode='edge')
+                pad = np.pad(ret[channel, :, :], (r, r), mode='edge')
                 # pad = np.pad(img[channel, :, :], (r, r), mode='median')
                 for i, kernel in enumerate(kernels):
                     cur_output = replace_mid(pad, kernel, r)
-                    d[i] = cur_output - img[channel, :, :]
+                    d[i] = cur_output - ret[channel, :, :]
                     pbar.update(1)
-                img[channel, :, :] = img[channel, :, :] + mt.mat_absmin(d)
-    return img
+                ret[channel, :, :] = ret[channel, :, :] + mt.mat_absmin(d)
+    return ret
 
 
 if __name__ == '__main__':
-    img_path = "/home/melodies/Downloads/test_pns.png"
+    # img_path = "/home/melodies/Downloads/Lenna.jpg"
+    img_path = input("Please provide the full path of input image (including file extension): ")
+    while not os.path.isfile(img_path):
+        img_path = input("Path not exist, please check again: ")
+
+    filter_type = (input("Please choose the operation you want:\ns: smoothing d: denoising\n(Can do better on "
+                         "pepper-and-salt noise)\n")).lower()[0]
+    while filter_type != "s" and filter_type != "d":
+        filter_type = input("Please type correct instruction: s for smoothing, d for denoising: ")
+
+    radius = 3
+    iteration = 1
+    customize = (input("You can type 'y' to customize parameter of filter radius and iteration number\nOr type any other key to use default parameter: radius = 3 and iteration = 1\n").lower())
+    if customize == "y":
+        print("Both parameter should be an integer")
+        radius = int(input("Your filter radius (larger the radius, coarser the image): "))
+        iteration = int(input("How many times the filtering you want: "))
+
     img = Image.open(img_path)
     img = np.asarray(img)  # format: rows, cols, channels
     img = np.transpose(img, (2, 0, 1))  # chw. transpose for better debugging
-    # output = SW_MeanFil(img, 5, 1)
-    output = SW_MidFil(img, 5, 1)
+
+    if filter_type == 's':
+        print("An edge-preserving smoothing will take place")
+        output = SW_MeanFil(img, radius, iteration)
+    else:
+        print("An edge-preserving denoising will take place")
+        output = SW_MidFil(img, radius, iteration)
+
+    img = np.transpose(img, (1, 2, 0))  # hwc
     output = np.transpose(output, (1, 2, 0))  # hwc
-    img = Image.fromarray(output)
+    img = np.hstack((img, output))
+    img = Image.fromarray(img)
     img.show()
-    img.save("/home/melodies/Downloads/test_depns.png")
+
+    output = Image.fromarray(output)
+    full_name = os.path.splitext(img_path)
+    save_path = full_name[0] + "_SW" + ("smoothing" if filter_type == 's' else "denoising") + full_name[-1]
+    output.save(save_path)
+    print("Output image saved to " + save_path)
