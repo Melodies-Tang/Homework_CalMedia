@@ -158,16 +158,27 @@ def SW_MidFil(img, r, iteration=1):
     return ret
 
 
+def enhance(img, r, iteration):
+    smoothed = SW_MeanFil(img, r, iteration)
+    num_channels = smoothed.shape[0]
+    ret = img.copy()
+    for channel in range(num_channels):
+        detail = np.sqrt((img[channel] - smoothed[channel]) ** 2)
+        detail = detail * 5 + smoothed[channel]
+        np.clip(detail, 0, 255)
+        ret[channel] = detail
+    return ret
+
+
 if __name__ == '__main__':
     # img_path = "/home/melodies/Downloads/Lenna.jpg"
-    img_path = input("Please provide the full path of input image (including file extension): ")
+    img_path = input("Please provide the full path of input image (e.g. /Downloads/Lenna.jpg):\n")
     while not os.path.isfile(img_path):
-        img_path = input("Path not exist, please check again: ")
+        img_path = input("Path not exist, please check again:\n")
 
-    filter_type = (input("Please choose the operation you want:\ns: smoothing d: denoising\n(Can do better on "
-                         "pepper-and-salt noise)\n")).lower()[0]
-    while filter_type != "s" and filter_type != "d":
-        filter_type = input("Please type correct instruction: s for smoothing, d for denoising: ")
+    filter_type = (input("Please choose the operation you want:\ns: smoothing d: denoising e: enhancement\n")).lower()
+    while filter_type != "s" and filter_type != "d" and filter_type != "e":
+        filter_type = input("Please type correct instruction: s for smoothing, d for denoising, e for enhancement: ")
 
     radius = 3
     iteration = 1
@@ -178,24 +189,34 @@ if __name__ == '__main__':
         iteration = int(input("How many times the filtering you want: "))
 
     img = Image.open(img_path)
+    # img = img.convert("L")
     img = np.asarray(img)  # format: rows, cols, channels
+    if len(img.shape) == 2:
+        img = img[:, :, np.newaxis]
     img = np.transpose(img, (2, 0, 1))  # chw. transpose for better debugging
 
     if filter_type == 's':
-        print("An edge-preserving smoothing will take place")
+        print("An edge-preserving smoothing processing")
         output = SW_MeanFil(img, radius, iteration)
-    else:
-        print("An edge-preserving denoising will take place")
+    elif filter_type == 'd':
+        print("An edge-preserving denoising processing")
         output = SW_MidFil(img, radius, iteration)
+    else:
+        print("Sharpening image")
+        output = enhance(img, radius, iteration)
 
-    img = np.transpose(img, (1, 2, 0))  # hwc
-    output = np.transpose(output, (1, 2, 0))  # hwc
+    if output.shape[0] == 1:
+        output = output[0]
+        img = img[0]
+    else:
+        img = np.transpose(img, (1, 2, 0))  # hwc
+        output = np.transpose(output, (1, 2, 0))  # hwc
     img = np.hstack((img, output))
     img = Image.fromarray(img)
     img.show()
 
     output = Image.fromarray(output)
     full_name = os.path.splitext(img_path)
-    save_path = full_name[0] + "_SW" + ("smoothing" if filter_type == 's' else "denoising") + full_name[-1]
+    save_path = full_name[0] + "_SW" + filter_type + full_name[-1]
     output.save(save_path)
     print("Output image saved to " + save_path)
